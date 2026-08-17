@@ -55,10 +55,10 @@ jobs:
         run: |
           ./gradlew tasks --all --no-daemon --console=plain > gradle-tasks.txt || true
 
-      - name: Run Gradle build (capture logs)
+      - name: Run Gradle build (capture logs, skip problematic task)
         run: |
-          ./gradlew clean build assemble jar createMinecraftArtifacts --no-daemon --stacktrace --info 2>&1 | tee build.log || true
-        # do not fail this step so we always collect debug outputs
+          ./gradlew clean build -x createMinecraftArtifacts --no-daemon --stacktrace --info 2>&1 | tee build.log || true
+        # skip createMinecraftArtifacts which fails in CI due to ZIP metadata issues
 
       - name: List all JAR files
         if: always()
@@ -73,7 +73,7 @@ jobs:
           ls -la
           if [ -d build ]; then
             echo "Contents of build/ (recursive):"
-            find build -maxdepth 4 -type d -print -exec ls -la {} \; || true
+            find build -maxdepth 6 -type d -print -exec ls -la {} \; || true
           else
             echo "No build directory found"
           fi
@@ -87,15 +87,12 @@ jobs:
             build.log
             gradle-tasks.txt
 
-      - name: Upload build artifacts (JARs)
+      - name: Upload collected JARs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: mod-jars
-          path: |
-            **/build/libs/*.jar
-            build/moddev/**/*.jar
-            **/*.jar
+          path: build/collected-jars/**
           if-no-files-found: warn
 
       - name: Upload full build folder for inspection
