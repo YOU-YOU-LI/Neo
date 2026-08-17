@@ -16,7 +16,8 @@ jobs:
           fetch-depth: 0
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        # upgraded to v5 per deprecation notice
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '21'
@@ -60,6 +61,78 @@ jobs:
           # createArtifactManifest will download artifacts referenced by NFRT
           ./gradlew createArtifactManifest scanCorruptedZips --no-daemon --stacktrace --info 2>&1 | tee create_artifacts.log || true
 
+      - name: Print manifest and artifact paths (debug)
+        run: |
+          echo "---- manifest (if present) ----"
+          if [ -f build/moddev/nfrt_artifact_manifest.properties ]; then
+            sed -n '1,400p' build/moddev/nfrt_artifact_manifest.properties || true
+            echo "---- listing .path entries from manifest ----"
+            grep '\.path=' build/moddev/nfrt_artifact_manifest.properties || true
+          else
+            echo "manifest not found"
+          fi
+
+      - name: Test each jar referenced by manifest (Python check)
+        run: |
+          set -e
+          python3 - <<'PY'
+import os, zipfile
+manifest='build/moddev/nfrt_artifact_manifest.properties'
+out='build/moddev/corrupted_jars.txt'
+if not os.path.exists(manifest):
+    print('manifest not found, skipping python jar tests')
+    raise SystemExit(0)
+
+# parse .path entries
+paths=[]
+with open(manifest,'r',encoding='utf-8',errors='ignore') as f:
+    for line in f:
+        line=line.strip()
+        if line and '=' in line and line.endswith('.path'):
+            # key may contain dots, value may contain '='; split at first '='
+            parts=line.split('=',1)
+            val=parts[1].strip()
+            paths.append(val)
+
+if not paths:
+    print('no .path entries found in manifest')
+    raise SystemExit(0)
+
+bad=[]
+for p in paths:
+    print('CHECK:',p)
+    if not os.path.exists(p):
+        print('  MISSING:',p)
+        bad.append(p)
+        continue
+    try:
+        with zipfile.ZipFile(p,'r') as z:
+            for zi in z.infolist():
+                # check for STORED entries with suspicious metadata
+                if zi.compress_type == zipfile.ZIP_STORED:
+                    # In Python, missing metadata would be unlikely, but check for zero sizes/crc
+                    if (zi.file_size == 0 and zi.compress_size == 0):
+                        print('  SUSPICIOUS STORED ENTRY (zero sizes):', zi.filename)
+                        bad.append(p)
+                        break
+                    if getattr(zi,'CRC',None) in (None,0):
+                        print('  SUSPICIOUS STORED ENTRY (missing CRC):', zi.filename)
+                        bad.append(p)
+                        break
+    except zipfile.BadZipFile as e:
+        print('  BAD ZIP:',p,e)
+        bad.append(p)
+
+if bad:
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    with open(out,'w') as fo:
+        for x in sorted(set(bad)):
+            fo.write(x+'\n')
+    print('Wrote corrupted paths to',out)
+else:
+    print('No problems found by python check')
+PY
+
       - name: Upload corrupted-jars report
         if: always()
         uses: actions/upload-artifact@v4
@@ -73,12 +146,23 @@ jobs:
         run: |
           if [ -f build/moddev/corrupted_jars.txt ]; then
             echo "Found corrupted_jars.txt - attempting to remove matching cached files and neoform runtime cache"
-            # remove neoform runtime cache
-            rm -rf "$HOME/.gradle/caches/neoformruntime" || true
-            # for each corrupted file, try to remove files in modules-2 with same basename
+            # print what we will delete for audit
+            echo "-- neoform runtime cache dir: $HOME/.gradle/caches/neoformruntime --"
+            if [ -d "$HOME/.gradle/caches/neoformruntime" ]; then
+              echo "(will remove neoformruntime cache)"
+            fi
+            # for each corrupted file, try to find and print matching cached files in modules-2
             while IFS= read -r p || [ -n "$p" ]; do
               fname=$(basename "$p")
-              echo "Removing cached files named $fname in ~/.gradle/caches/modules-2"
+              echo "Would remove cached files named $fname in ~/.gradle/caches/modules-2"
+              find "$HOME/.gradle/caches/modules-2" -type f -name "$fname" -print || true
+            done < build/moddev/corrupted_jars.txt || true
+
+            # now actually remove (final step)
+            echo "Removing neoformruntime cache and matching cached files..."
+            rm -rf "$HOME/.gradle/caches/neoformruntime" || true
+            while IFS= read -r p || [ -n "$p" ]; do
+              fname=$(basename "$p")
               find "$HOME/.gradle/caches/modules-2" -type f -name "$fname" -exec rm -f {} \; || true
             done < build/moddev/corrupted_jars.txt || true
             echo "Cleanup attempted."
