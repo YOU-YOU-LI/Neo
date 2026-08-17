@@ -54,16 +54,24 @@ jar {
     }
 }
 
+// Existing utility task to scan referenced jars for STORED entries missing metadata.
+// Enhanced: write results to build/moddev/corrupted_jars.txt (one absolute path per line)
+// so CI can delete cached corrupted jars and retry createMinecraftArtifacts.
+
 tasks.register('scanCorruptedZips') {
     doLast {
         def manifest = file('build/moddev/nfrt_artifact_manifest.properties')
+        def outFile = file('build/moddev/corrupted_jars.txt')
         if (!manifest.exists()) {
-            println "Manifest not found. Run createMinecraftArtifacts first."
+            println "Manifest not found. Run createArtifactManifest first."
+            if (outFile.exists()) outFile.delete()
             return
         }
         def props = new Properties()
         manifest.withInputStream { props.load(it) }
-        
+        if (!outFile.parentFile.exists()) outFile.parentFile.mkdirs()
+        outFile.text = ''
+
         println "开始扫描所有引用的 JAR 文件..."
         props.each { key, value ->
             if (key.toString().endsWith('.path')) {
@@ -72,21 +80,30 @@ tasks.register('scanCorruptedZips') {
                     try {
                         def zip = new java.util.zip.ZipFile(jarFile)
                         zip.entries().each { entry ->
-                            // 检查 STORED 条目是否缺少必要元数据
                             if (entry.method == java.util.zip.ZipEntry.STORED) {
                                 if (entry.size == -1 || entry.compressedSize == -1 || entry.crc == -1) {
-                                    println "❌ 损坏文件确认: ${jarFile.name} -> 条目: ${entry.name} 缺少 STORED 元数据"
+                                    def msg = "❌ 损坏文件确认: ${jarFile.absolutePath} -> 条目: ${entry.name} 缺少 STORED 元数据"
+                                    println msg
+                                    outFile << jarFile.absolutePath + System.lineSeparator()
+                                    // break early for this jar
+                                    return
                                 }
                             }
                         }
                         zip.close()
                     } catch (Exception e) {
                         println "❌ 完全无法读取的 ZIP: ${jarFile.absolutePath} - ${e.message}"
+                        outFile << jarFile.absolutePath + System.lineSeparator()
                     }
                 }
             }
         }
-        println "扫描结束。请查看上方输出的文件路径。"
+        if (outFile.exists() && outFile.text.trim().length() > 0) {
+            println "扫描结束。发现损坏 JAR，已写入: ${outFile.absolutePath}"
+        } else {
+            outFile.delete()
+            println "扫描结束。未发现损坏 JAR。"
+        }
     }
 }
 
