@@ -1,0 +1,91 @@
+plugins {
+    id 'java'
+    id 'net.neoforged.moddev' version '1.0.23'  // 最新稳定版插件
+}
+
+base {
+    archivesName = "afkmod"
+}
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+neoForge {
+    version = '21.10.63'  // 换成 21.1.0，这个版本更成熟
+    // 不使用 neoFormVersion，让插件自动适配
+    
+    runs {
+        client {
+            client()
+            programArguments.addAll '--mixin', 'afkmod.mixins.json'
+        }
+        server {
+            server()
+            programArgument '--nogui'
+            programArguments.addAll '--mixin', 'afkmod.mixins.json'
+        }
+    }
+    mods {
+        afkmod {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+repositories {
+    mavenCentral()
+    maven {
+        name = 'NeoForge'
+        url = 'https://maven.neoforged.net/releases/'
+    }
+}
+
+dependencies {
+    // 排除所有传递依赖，避免 jtracy 等冲突
+    implementation('net.neoforged:neoforge:21.1.0') {
+        transitive = false
+    }
+}
+
+jar {
+    manifest {
+        attributes([
+            "MixinConfigs": "afkmod.mixins.json"
+        ])
+    }
+}
+
+tasks.register('scanCorruptedZips') {
+    doLast {
+        def manifest = file('build/moddev/nfrt_artifact_manifest.properties')
+        if (!manifest.exists()) {
+            println "Manifest not found. Run createMinecraftArtifacts first."
+            return
+        }
+        def props = new Properties()
+        manifest.withInputStream { props.load(it) }
+        
+        println "开始扫描所有引用的 JAR 文件..."
+        props.each { key, value ->
+            if (key.toString().endsWith('.path')) {
+                def jarFile = new File(value.toString())
+                if (jarFile.exists()) {
+                    try {
+                        def zip = new java.util.zip.ZipFile(jarFile)
+                        zip.entries().each { entry ->
+                            // 检查 STORED 条目是否缺少必要元数据
+                            if (entry.method == java.util.zip.ZipEntry.STORED) {
+                                if (entry.size == -1 || entry.compressedSize == -1 || entry.crc == -1) {
+                                    println "❌ 损坏文件确认: ${jarFile.name} -> 条目: ${entry.name} 缺少 STORED 元数据"
+                                }
+                            }
+                        }
+                        zip.close()
+                    } catch (Exception e) {
+                        println "❌ 完全无法读取的 ZIP: ${jarFile.absolutePath} - ${e.message}"
+                    }
+                }
+            }
+        }
+        println "扫描结束。请查看上方输出的文件路径。"
+    }
+}
