@@ -1,0 +1,21 @@
+modLoader = "javafml"
+loaderVersion = "[4,)"
+license = "All rights reserved"
+
+[[mods]]
+modId = "afkmod"
+version = "1.0.0"
+displayName = "AFK挂机优化模组"
+logoFile = "afkmod.png"
+credits = "Made for You"
+authors = "YourName"
+description = '''
+极致省电挂机模组，彻底停止渲染、丢弃无用数据包、每10分钟自动晃动防T出。
+'''
+
+[[dependencies.afkmod]]
+    modId = "neoforge"
+    mandatory = true
+    versionRange = "[41,)"
+    ordering = "NONE"
+    side = "CLIENT"
