@@ -55,6 +55,12 @@ jobs:
       run: |
         ./gradlew build --no-daemon --stacktrace --info 2>&1 | tee build.log
       # keep failure behavior - step will fail if build fails
+      
+    - name: List all JAR files
+      if: always()
+      run: |
+        echo "查找所有 .jar 文件："
+        find . -name "*.jar" -type f
 
     - name: Upload build log (always)
       if: always()
@@ -63,9 +69,8 @@ jobs:
         name: gradle-build-log
         path: build.log
 
-    - name: Upload build artifacts (JARs if present)
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: mod-jar
-        path: build/libs/**/*.jar
+     - name: Upload build artifacts
+       uses: actions/upload-artifact@v4
+       with:
+         name: mod-jar
+         path: '**/build/libs/*.jar'
