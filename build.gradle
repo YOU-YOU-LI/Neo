@@ -89,3 +89,24 @@ tasks.register('scanCorruptedZips') {
         println "扫描结束。请查看上方输出的文件路径。"
     }
 }
+
+// === CI helper: collect all JARs into a single directory so workflow can reliably upload them ===
+import org.gradle.api.tasks.Copy
+
+tasks.register('collectJars', Copy) {
+    from(fileTree(dir: '.', include: [
+        '**/build/libs/*.jar',
+        'build/moddev/**/*.jar',
+        '**/mods/*.jar',
+        '**/distributions/*.jar',
+        '**/*.jar'
+    ]))
+    into("$buildDir/collected-jars")
+    // avoid copying wrapper/debug files like gradle-wrapper.jar by excluding common wrapper names
+    exclude 'gradle/wrapper/**'
+}
+
+// Ensure collectJars runs after common lifecycle tasks so artifacts exist
+tasks.matching { it.name == 'build' || it.name == 'assemble' || it.name == 'createMinecraftArtifacts' }.all {
+    finalizedBy tasks.named('collectJars')
+}
