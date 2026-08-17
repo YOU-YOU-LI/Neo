@@ -55,10 +55,40 @@ jobs:
         run: |
           ./gradlew tasks --all --no-daemon --console=plain > gradle-tasks.txt || true
 
-      - name: Run Gradle build (capture logs, skip problematic task)
+      - name: Generate artifact manifest and scan for corrupted jars
         run: |
-          ./gradlew clean build -x createMinecraftArtifacts --no-daemon --stacktrace --info 2>&1 | tee build.log || true
-        # skip createMinecraftArtifacts which fails in CI due to ZIP metadata issues
+          # createArtifactManifest will download artifacts referenced by NFRT
+          ./gradlew createArtifactManifest scanCorruptedZips --no-daemon --stacktrace --info 2>&1 | tee create_artifacts.log || true
+
+      - name: Upload corrupted-jars report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: corrupted-jars
+          path: build/moddev/corrupted_jars.txt
+          if-no-files-found: warn
+
+      - name: Cleanup corrupted cached artifacts (if any)
+        if: always()
+        run: |
+          if [ -f build/moddev/corrupted_jars.txt ]; then
+            echo "Found corrupted_jars.txt - attempting to remove matching cached files and neoform runtime cache"
+            # remove neoform runtime cache
+            rm -rf "$HOME/.gradle/caches/neoformruntime" || true
+            # for each corrupted file, try to remove files in modules-2 with same basename
+            while IFS= read -r p || [ -n "$p" ]; do
+              fname=$(basename "$p")
+              echo "Removing cached files named $fname in ~/.gradle/caches/modules-2"
+              find "$HOME/.gradle/caches/modules-2" -type f -name "$fname" -exec rm -f {} \; || true
+            done < build/moddev/corrupted_jars.txt || true
+            echo "Cleanup attempted."
+          else
+            echo "No corrupted_jars.txt found - nothing to clean"
+          fi
+
+      - name: Run Gradle build and try createMinecraftArtifacts (after cleanup)
+        run: |
+          ./gradlew clean build createMinecraftArtifacts --no-daemon --stacktrace --info 2>&1 | tee build.log || true
 
       - name: List all JAR files
         if: always()
@@ -78,13 +108,14 @@ jobs:
             echo "No build directory found"
           fi
 
-      - name: Upload build log (always)
+      - name: Upload build logs and task list
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: gradle-build-log
           path: |
             build.log
+            create_artifacts.log
             gradle-tasks.txt
 
       - name: Upload collected JARs
