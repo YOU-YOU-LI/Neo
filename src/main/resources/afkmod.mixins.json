@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.yourname.afkmod.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "refmap": "afkmod.refmap.json",
+  "mixins": [
+    "ClientPacketListenerMixin"
+  ],
+  "client": [],
+  "server": []
+}
