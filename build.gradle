@@ -40,10 +40,8 @@ repositories {
 }
 
 dependencies {
-    // 排除所有传递依赖，避免 jtracy 等冲突
-    implementation('net.neoforged:neoforge:21.1.0') {
-        transitive = false
-    }
+    // 恢复传递依赖，以便编译时获得 Minecraft/Neoforge 所需的所有类
+    implementation 'net.neoforged:neoforge:21.1.0'
 }
 
 jar {
