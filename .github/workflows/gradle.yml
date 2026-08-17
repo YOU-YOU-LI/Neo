@@ -49,25 +49,43 @@ jobs:
           fi
 
       - name: Show Gradle version (wrapper)
-        run: ./gradlew --version
+        run: ./gradlew --version || true
+
+      - name: Print available Gradle tasks (debug)
+        run: |
+          ./gradlew tasks --all --no-daemon --console=plain > gradle-tasks.txt || true
 
       - name: Run Gradle build (capture logs)
         run: |
-          ./gradlew clean build createMinecraftArtifacts --no-daemon --stacktrace --info 2>&1 | tee build.log
-        # keep failure behavior - step will fail if build fails
+          ./gradlew clean build assemble jar createMinecraftArtifacts --no-daemon --stacktrace --info 2>&1 | tee build.log || true
+        # do not fail this step so we always collect debug outputs
 
       - name: List all JAR files
         if: always()
         run: |
           echo "查找所有 .jar 文件："
-          find . -name "*.jar" -type f || true
+          find . -name "*.jar" -type f -exec ls -l {} \; || true
+
+      - name: Print build tree (debug)
+        if: always()
+        run: |
+          echo "---- build directory tree ----"
+          ls -la
+          if [ -d build ]; then
+            echo "Contents of build/ (recursive):"
+            find build -maxdepth 4 -type d -print -exec ls -la {} \; || true
+          else
+            echo "No build directory found"
+          fi
 
       - name: Upload build log (always)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: gradle-build-log
-          path: build.log
+          path: |
+            build.log
+            gradle-tasks.txt
 
       - name: Upload build artifacts (JARs)
         if: always()
@@ -78,3 +96,12 @@ jobs:
             **/build/libs/*.jar
             build/moddev/**/*.jar
             **/*.jar
+          if-no-files-found: warn
+
+      - name: Upload full build folder for inspection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-folder
+          path: build/**
+          if-no-files-found: warn
