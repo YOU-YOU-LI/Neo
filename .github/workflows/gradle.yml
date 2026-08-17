@@ -76,62 +76,62 @@ jobs:
         run: |
           set -e
           python3 - <<'PY'
-import os, zipfile
-manifest='build/moddev/nfrt_artifact_manifest.properties'
-out='build/moddev/corrupted_jars.txt'
-if not os.path.exists(manifest):
-    print('manifest not found, skipping python jar tests')
-    raise SystemExit(0)
+            import os, zipfile
+            manifest='build/moddev/nfrt_artifact_manifest.properties'
+            out='build/moddev/corrupted_jars.txt'
+            if not os.path.exists(manifest):
+                print('manifest not found, skipping python jar tests')
+                raise SystemExit(0)
 
-# parse .path entries
-paths=[]
-with open(manifest,'r',encoding='utf-8',errors='ignore') as f:
-    for line in f:
-        line=line.strip()
-        if line and '=' in line and line.endswith('.path'):
-            # key may contain dots, value may contain '='; split at first '='
-            parts=line.split('=',1)
-            val=parts[1].strip()
-            paths.append(val)
+            # parse .path entries
+            paths=[]
+            with open(manifest,'r',encoding='utf-8',errors='ignore') as f:
+                for line in f:
+                    line=line.strip()
+                    if line and '=' in line and line.endswith('.path'):
+                        # key may contain dots, value may contain '='; split at first '='
+                        parts=line.split('=',1)
+                        val=parts[1].strip()
+                        paths.append(val)
 
-if not paths:
-    print('no .path entries found in manifest')
-    raise SystemExit(0)
+            if not paths:
+                print('no .path entries found in manifest')
+                raise SystemExit(0)
 
-bad=[]
-for p in paths:
-    print('CHECK:',p)
-    if not os.path.exists(p):
-        print('  MISSING:',p)
-        bad.append(p)
-        continue
-    try:
-        with zipfile.ZipFile(p,'r') as z:
-            for zi in z.infolist():
-                # check for STORED entries with suspicious metadata
-                if zi.compress_type == zipfile.ZIP_STORED:
-                    # In Python, missing metadata would be unlikely, but check for zero sizes/crc
-                    if (zi.file_size == 0 and zi.compress_size == 0):
-                        print('  SUSPICIOUS STORED ENTRY (zero sizes):', zi.filename)
-                        bad.append(p)
-                        break
-                    if getattr(zi,'CRC',None) in (None,0):
-                        print('  SUSPICIOUS STORED ENTRY (missing CRC):', zi.filename)
-                        bad.append(p)
-                        break
-    except zipfile.BadZipFile as e:
-        print('  BAD ZIP:',p,e)
-        bad.append(p)
+            bad=[]
+            for p in paths:
+                print('CHECK:',p)
+                if not os.path.exists(p):
+                    print('  MISSING:',p)
+                    bad.append(p)
+                    continue
+                try:
+                    with zipfile.ZipFile(p,'r') as z:
+                        for zi in z.infolist():
+                            # check for STORED entries with suspicious metadata
+                            if zi.compress_type == zipfile.ZIP_STORED:
+                                # In Python, missing metadata would be unlikely, but check for zero sizes/crc
+                                if (zi.file_size == 0 and zi.compress_size == 0):
+                                    print('  SUSPICIOUS STORED ENTRY (zero sizes):', zi.filename)
+                                    bad.append(p)
+                                    break
+                                if getattr(zi,'CRC',None) in (None,0):
+                                    print('  SUSPICIOUS STORED ENTRY (missing CRC):', zi.filename)
+                                    bad.append(p)
+                                    break
+                except zipfile.BadZipFile as e:
+                    print('  BAD ZIP:',p,e)
+                    bad.append(p)
 
-if bad:
-    os.makedirs(os.path.dirname(out), exist_ok=True)
-    with open(out,'w') as fo:
-        for x in sorted(set(bad)):
-            fo.write(x+'\n')
-    print('Wrote corrupted paths to',out)
-else:
-    print('No problems found by python check')
-PY
+            if bad:
+                os.makedirs(os.path.dirname(out), exist_ok=True)
+                with open(out,'w') as fo:
+                    for x in sorted(set(bad)):
+                        fo.write(x+'\n')
+                print('Wrote corrupted paths to',out)
+            else:
+                print('No problems found by python check')
+          PY
 
       - name: Upload corrupted-jars report
         if: always()
