@@ -1,14 +1,22 @@
-buildscript {
-    repositories {
-        mavenCentral()
-        maven { url = 'https://maven.minecraftforge.net/' }
-    }
-    dependencies {
-        classpath 'net.minecraftforge.gradle:ForgeGradle:6.0.27'
+plugins {
+    id 'java'
+    id 'net.minecraftforge.gradle' version '6.0.27'
+}
+
+group = 'com.yourname'
+version = '1.0'
+archivesBaseName = 'afk'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
     }
 }
 
-apply plugin: 'net.minecraftforge.gradle'
+repositories {
+    mavenCentral()
+    maven { url = 'https://maven.minecraftforge.net/' }
+}
 
 minecraft {
     mappings channel: 'official', version: '1.21.1'
@@ -22,9 +30,31 @@ minecraft {
                 }
             }
         }
+        server {
+            workingDirectory project.file('run')
+            property 'forge.logging.mojanglevels', 'info'
+            mods {
+                afkmod {
+                    source sourceSets.main
+                }
+            }
+        }
     }
 }
 
 dependencies {
     minecraft 'net.minecraftforge:forge:1.21.1-52.0.0'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+jar {
+    manifest {
+        attributes(
+            'Implementation-Title': project.name,
+            'Implementation-Version': project.version
+        )
+    }
 }
