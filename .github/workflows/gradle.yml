@@ -1,219 +1,45 @@
+# 工作流名称
 name: Java CI with Gradle
 
+# 触发条件：当推送到 main 分支或发起 Pull Request 时运行
 on:
   push:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
 
+# 定义工作流中的任务
 jobs:
   build:
+    # 运行环境：使用最新的 Ubuntu
     runs-on: ubuntu-latest
+
+    # 执行步骤
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+    # 1. 检出代码
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      - name: Set up JDK 21
-        # upgraded to v5 per deprecation notice
-        uses: actions/setup-java@v5
-        with:
-          distribution: 'temurin'
-          java-version: '21'
-          cache: 'gradle'
+    # 2. 设置 Java 环境 (JDK 21)
+    - name: Set up JDK 21
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'    # 使用 Eclipse Temurin (原 AdoptOpenJDK)
+        java-version: '21'         # NeoForge 要求 Java 21[reference:2]
+        cache: 'gradle'            # 自动缓存 Gradle 依赖，加速构建
 
-      - name: Show Java info
-        run: |
-          java -version
-          javac -version
-          echo "JAVA_HOME=$JAVA_HOME"
+    # 3. 赋予 gradlew 执行权限 (Linux/macOS 环境需要)
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
 
-      - name: Show Gradle wrapper properties
-        run: |
-          if [ -f gradle/wrapper/gradle-wrapper.properties ]; then
-            echo "gradle-wrapper.properties:"
-            sed -n '1,200p' gradle/wrapper/gradle-wrapper.properties
-          else
-            echo "No gradle-wrapper.properties found"
-          fi
+    # 4. 执行 Gradle 构建
+    # 使用 --no-daemon 避免守护进程问题[reference:4]
+    - name: Build with Gradle
+      run: ./gradlew build --no-daemon
 
-      - name: Ensure gradlew is executable
-        run: |
-          if [ -f "./gradlew" ]; then
-            chmod +x ./gradlew
-            ls -la ./gradlew
-          else
-            echo "gradlew not found in repo root"
-            ls -la
-            exit 1
-          fi
-
-      - name: Show Gradle version (wrapper)
-        run: ./gradlew --version || true
-
-      - name: Print available Gradle tasks (debug)
-        run: |
-          ./gradlew tasks --all --no-daemon --console=plain > gradle-tasks.txt || true
-
-      - name: Generate artifact manifest and scan for corrupted jars
-        run: |
-          # createArtifactManifest will download artifacts referenced by NFRT
-          ./gradlew createArtifactManifest scanCorruptedZips --no-daemon --stacktrace --info 2>&1 | tee create_artifacts.log || true
-
-      - name: Print manifest and artifact paths (debug)
-        run: |
-          echo "---- manifest (if present) ----"
-          if [ -f build/moddev/nfrt_artifact_manifest.properties ]; then
-            sed -n '1,400p' build/moddev/nfrt_artifact_manifest.properties || true
-            echo "---- listing .path entries from manifest ----"
-            grep '\.path=' build/moddev/nfrt_artifact_manifest.properties || true
-          else
-            echo "manifest not found"
-          fi
-
-      - name: Test each jar referenced by manifest (Python check)
-        run: |
-          set -e
-          python3 - <<'PY'
-            import os, zipfile
-            manifest='build/moddev/nfrt_artifact_manifest.properties'
-            out='build/moddev/corrupted_jars.txt'
-            if not os.path.exists(manifest):
-                print('manifest not found, skipping python jar tests')
-                raise SystemExit(0)
-
-            # parse .path entries
-            paths=[]
-            with open(manifest,'r',encoding='utf-8',errors='ignore') as f:
-                for line in f:
-                    line=line.strip()
-                    if line and '=' in line and line.endswith('.path'):
-                        # key may contain dots, value may contain '='; split at first '='
-                        parts=line.split('=',1)
-                        val=parts[1].strip()
-                        paths.append(val)
-
-            if not paths:
-                print('no .path entries found in manifest')
-                raise SystemExit(0)
-
-            bad=[]
-            for p in paths:
-                print('CHECK:',p)
-                if not os.path.exists(p):
-                    print('  MISSING:',p)
-                    bad.append(p)
-                    continue
-                try:
-                    with zipfile.ZipFile(p,'r') as z:
-                        for zi in z.infolist():
-                            # check for STORED entries with suspicious metadata
-                            if zi.compress_type == zipfile.ZIP_STORED:
-                                # In Python, missing metadata would be unlikely, but check for zero sizes/crc
-                                if (zi.file_size == 0 and zi.compress_size == 0):
-                                    print('  SUSPICIOUS STORED ENTRY (zero sizes):', zi.filename)
-                                    bad.append(p)
-                                    break
-                                if getattr(zi,'CRC',None) in (None,0):
-                                    print('  SUSPICIOUS STORED ENTRY (missing CRC):', zi.filename)
-                                    bad.append(p)
-                                    break
-                except zipfile.BadZipFile as e:
-                    print('  BAD ZIP:',p,e)
-                    bad.append(p)
-
-            if bad:
-                os.makedirs(os.path.dirname(out), exist_ok=True)
-                with open(out,'w') as fo:
-                    for x in sorted(set(bad)):
-                        fo.write(x+'\n')
-                print('Wrote corrupted paths to',out)
-            else:
-                print('No problems found by python check')
-          PY
-
-      - name: Upload corrupted-jars report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: corrupted-jars
-          path: build/moddev/corrupted_jars.txt
-          if-no-files-found: warn
-
-      - name: Cleanup corrupted cached artifacts (if any)
-        if: always()
-        run: |
-          if [ -f build/moddev/corrupted_jars.txt ]; then
-            echo "Found corrupted_jars.txt - attempting to remove matching cached files and neoform runtime cache"
-            # print what we will delete for audit
-            echo "-- neoform runtime cache dir: $HOME/.gradle/caches/neoformruntime --"
-            if [ -d "$HOME/.gradle/caches/neoformruntime" ]; then
-              echo "(will remove neoformruntime cache)"
-            fi
-            # for each corrupted file, try to find and print matching cached files in modules-2
-            while IFS= read -r p || [ -n "$p" ]; do
-              fname=$(basename "$p")
-              echo "Would remove cached files named $fname in ~/.gradle/caches/modules-2"
-              find "$HOME/.gradle/caches/modules-2" -type f -name "$fname" -print || true
-            done < build/moddev/corrupted_jars.txt || true
-
-            # now actually remove (final step)
-            echo "Removing neoformruntime cache and matching cached files..."
-            rm -rf "$HOME/.gradle/caches/neoformruntime" || true
-            while IFS= read -r p || [ -n "$p" ]; do
-              fname=$(basename "$p")
-              find "$HOME/.gradle/caches/modules-2" -type f -name "$fname" -exec rm -f {} \; || true
-            done < build/moddev/corrupted_jars.txt || true
-            echo "Cleanup attempted."
-          else
-            echo "No corrupted_jars.txt found - nothing to clean"
-          fi
-
-      - name: Run Gradle build and try createMinecraftArtifacts (after cleanup)
-        run: |
-          ./gradlew clean build createMinecraftArtifacts --no-daemon --stacktrace --info 2>&1 | tee build.log || true
-
-      - name: List all JAR files
-        if: always()
-        run: |
-          echo "查找所有 .jar 文件："
-          find . -name "*.jar" -type f -exec ls -l {} \; || true
-
-      - name: Print build tree (debug)
-        if: always()
-        run: |
-          echo "---- build directory tree ----"
-          ls -la
-          if [ -d build ]; then
-            echo "Contents of build/ (recursive):"
-            find build -maxdepth 6 -type d -print -exec ls -la {} \; || true
-          else
-            echo "No build directory found"
-          fi
-
-      - name: Upload build logs and task list
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gradle-build-log
-          path: |
-            build.log
-            create_artifacts.log
-            gradle-tasks.txt
-
-      - name: Upload collected JARs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: mod-jars
-          path: build/collected-jars/**
-          if-no-files-found: warn
-
-      - name: Upload full build folder for inspection
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-folder
-          path: build/**
-          if-no-files-found: warn
+    # 5. 上传构建产物 (生成的 JAR 文件)
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: mod-jar
+        path: build/libs/*.jar
