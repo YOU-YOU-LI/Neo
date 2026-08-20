@@ -6,6 +6,11 @@ pluginManagement {
             name = 'NeoForge'
             url = 'https://maven.neoforged.net/releases/'
         }
+        // Required for resolving the ForgeGradle plugin marker
+        maven {
+            name = 'MavenForge'
+            url = 'https://maven.minecraftforge.net/'
+        }
     }
 }
 
